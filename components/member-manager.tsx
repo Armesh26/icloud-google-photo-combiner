@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import type { EventMember } from "@/lib/db";
 
 type Props = {
@@ -14,18 +14,18 @@ export default function MemberManager({ eventId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    if (!open) return;
-    fetchMembers();
-  }, [open, eventId]);
-
-  async function fetchMembers() {
+  const fetchMembers = useCallback(async () => {
     const res = await fetch(`/api/event-members?eventId=${eventId}`);
     if (res.ok) {
       const data = await res.json();
       setMembers(data.members);
     }
-  }
+  }, [eventId]);
+
+  useEffect(() => {
+    if (!open) return;
+    fetchMembers();
+  }, [open, fetchMembers]);
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();

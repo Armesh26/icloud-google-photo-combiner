@@ -157,7 +157,7 @@ function extractVideos(
   html: string,
   photos: ScrapedPhoto[],
   seenUrls: Set<string>,
-  videoThumbnailBaseUrls: Set<string>
+  _videoThumbnailBaseUrls: Set<string>
 ) {
   const $ = cheerio.load(html);
 
