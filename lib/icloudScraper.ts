@@ -3,6 +3,135 @@ import type { ScrapedPhoto } from "./googleScraper";
 
 export type { ScrapedPhoto };
 
+// ── iCloud "Shared Photo Link" scraper ─────────────────────────────────────
+// Handles https://share.icloud.com/photos/<TOKEN>
+//
+// These use Apple's CloudKit API (ckdatabasews.icloud.com), not sharedstreams.
+// Flow:
+//   1. records/resolve  → zone ID + anonymous access token + partition URL
+//   2. records/query    → CPLMaster records with signed downloadURLs
+//   3. Replace ${f} template in URLs and build ScrapedPhoto[]
+
+const CK_BASE = "https://ckdatabasews.icloud.com";
+const CK_CONTAINER = "com.apple.photos.cloud";
+const CK_ENV = "production";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CKRecord = Record<string, any>;
+
+const VIDEO_ITEM_TYPES = new Set([
+  "com.apple.quicktime-movie",
+  "public.mpeg-4",
+  "public.movie",
+  "public.avi",
+]);
+
+function ckUrl(downloadURL: string | undefined): string | null {
+  if (!downloadURL) return null;
+  // ${f} is a filename template; the server ignores it for content but needs something
+  return downloadURL.replace("${f}", "photo.jpeg");
+}
+
+export async function scrapeICloudShareLink(albumUrl: string): Promise<ScrapedPhoto[]> {
+  const tokenMatch = albumUrl.match(/share\.icloud\.com\/photos\/([A-Za-z0-9_-]+)/);
+  if (!tokenMatch) throw new Error("Invalid iCloud share link URL — no token found");
+  const shortGUID = tokenMatch[1];
+
+  // Step 1: Resolve the shortGUID → zone info + anonymous access credentials
+  const resolveRes = await axios.post(
+    `${CK_BASE}/database/1/${CK_CONTAINER}/${CK_ENV}/public/records/resolve?remapEnums=true&getCurrentSyncToken=true`,
+    { shortGUIDs: [{ value: shortGUID }] },
+    {
+      headers: { "Content-Type": "text/plain", Origin: "https://www.icloud.com" },
+      timeout: 15000,
+    }
+  );
+
+  const result = resolveRes.data?.results?.[0];
+  if (!result) throw new Error("iCloud share link: resolve returned no results");
+
+  const { zoneID, anonymousPublicAccess } = result;
+  if (!anonymousPublicAccess?.token || !anonymousPublicAccess?.databasePartition) {
+    throw new Error("iCloud share link: no anonymous access token in resolve response");
+  }
+
+  const { token, databasePartition } = anonymousPublicAccess as {
+    token: string;
+    databasePartition: string;
+  };
+
+  // Step 2: Query CPLAsset+Master records from the shared zone using the token
+  const allRecords: CKRecord[] = [];
+  let syncToken: string | undefined;
+
+  do {
+    const body: Record<string, unknown> = {
+      query: {
+        recordType: "CPLAssetAndMasterByAssetDateWithoutHiddenOrDeleted",
+        filterBy: [
+          {
+            fieldName: "direction",
+            comparator: "EQUALS",
+            fieldValue: { value: "DESCENDING", type: "STRING" },
+          },
+        ],
+      },
+      zoneID,
+      resultsLimit: 200,
+    };
+    if (syncToken) body.syncToken = syncToken;
+
+    const queryRes = await axios.post(
+      `${databasePartition}/database/1/${CK_CONTAINER}/${CK_ENV}/shared/records/query?remapEnums=true&getCurrentSyncToken=true&publicAccessAuthToken=${encodeURIComponent(token)}`,
+      body,
+      {
+        headers: { "Content-Type": "text/plain", Origin: "https://www.icloud.com" },
+        timeout: 15000,
+      }
+    );
+
+    const batch: CKRecord[] = queryRes.data?.records ?? [];
+    allRecords.push(...batch);
+    syncToken = queryRes.data?.syncToken;
+
+    // Stop if we got fewer records than requested (last page)
+    if (batch.length < 200) break;
+  } while (syncToken);
+
+  // Step 3: Build ScrapedPhoto[] from CPLMaster records (CPLAsset records are skipped)
+  const photos: ScrapedPhoto[] = [];
+
+  for (const record of allRecords) {
+    if (record.recordType !== "CPLMaster") continue;
+
+    const f = record.fields ?? {};
+    const itemType: string = f.itemType?.value ?? "";
+    const isVideo = VIDEO_ITEM_TYPES.has(itemType);
+
+    const width: number | null = f.resOriginalWidth?.value ?? null;
+    const height: number | null = f.resOriginalHeight?.value ?? null;
+
+    const photoUrl =
+      ckUrl(f.resOriginalRes?.value?.downloadURL) ??
+      ckUrl(f.resJPEGMedRes?.value?.downloadURL);
+    const thumbUrl =
+      ckUrl(f.resJPEGMedRes?.value?.downloadURL) ??
+      ckUrl(f.resOriginalRes?.value?.downloadURL);
+
+    if (!photoUrl) continue;
+
+    photos.push({
+      photo_url: photoUrl,
+      thumbnail_url: thumbUrl ?? photoUrl,
+      width,
+      height,
+      media_type: isVideo ? "video" : "image",
+    });
+  }
+
+  return photos;
+}
+
 function extractToken(albumUrl: string): string | null {
   const hashIndex = albumUrl.indexOf("#");
   if (hashIndex !== -1) return albumUrl.slice(hashIndex + 1);

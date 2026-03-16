@@ -1,6 +1,6 @@
 import { getSupabase } from "./db";
 import { scrapeGooglePhotosAlbum } from "./googleScraper";
-import { scrapeICloudAlbum } from "./icloudScraper";
+import { scrapeICloudAlbum, scrapeICloudShareLink } from "./icloudScraper";
 import type { ScrapedPhoto } from "./googleScraper";
 import { shouldRescrape } from "./utils";
 
@@ -71,7 +71,9 @@ async function doScrape(
       photos =
         source === "google"
           ? await scrapeGooglePhotosAlbum(albumUrl)
-          : await scrapeICloudAlbum(albumUrl);
+          : albumUrl.includes("share.icloud.com/photos/")
+            ? await scrapeICloudShareLink(albumUrl)
+            : await scrapeICloudAlbum(albumUrl);
       lastError = null;
       break;
     } catch (err: unknown) {
@@ -154,12 +156,13 @@ async function validateMediaUrls(photos: ScrapedPhoto[]): Promise<ScrapedPhoto[]
 
         clearTimeout(timeoutId);
 
-        // 2xx or 206 (partial content) means the video URL is valid
-        if (res.ok || res.status === 206) {
+        // 2xx or 206 (partial content) means the video URL is valid.
+        // 501/405 means the CDN doesn't support HEAD (e.g. iCloud) — treat as valid.
+        if (res.ok || res.status === 206 || res.status === 501 || res.status === 405) {
           return photo;
         }
 
-        // Non-2xx: video URL is broken, hide this item
+        // Non-2xx (excluding above): video URL is broken, hide this item
         console.log(`Video URL failed (${res.status}): ${photo.photo_url.slice(0, 80)}...`);
         return null;
       } catch (err) {
