@@ -32,6 +32,23 @@ function ckUrl(downloadURL: string | undefined): string | null {
   return downloadURL.replace("${f}", "photo.jpeg");
 }
 
+export async function fetchICloudShareLinkName(albumUrl: string): Promise<string | null> {
+  try {
+    const tokenMatch = albumUrl.match(/share\.icloud\.com\/photos\/([A-Za-z0-9_-]+)/);
+    if (!tokenMatch) return null;
+    const res = await axios.post(
+      `${CK_BASE}/database/1/${CK_CONTAINER}/${CK_ENV}/public/records/resolve?remapEnums=true`,
+      { shortGUIDs: [{ value: tokenMatch[1] }] },
+      { headers: { "Content-Type": "text/plain", Origin: "https://www.icloud.com" }, timeout: 10000 }
+    );
+    const share = res.data?.results?.[0]?.share;
+    const title = share?.fields?.["cloudkit.title"]?.value;
+    return title && title.trim() ? title.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function scrapeICloudShareLink(albumUrl: string): Promise<ScrapedPhoto[]> {
   const tokenMatch = albumUrl.match(/share\.icloud\.com\/photos\/([A-Za-z0-9_-]+)/);
   if (!tokenMatch) throw new Error("Invalid iCloud share link URL — no token found");
@@ -220,6 +237,23 @@ function pickDerivatives(meta: ICloudPhotoMeta): {
   }
 
   return { bestChecksum, thumbChecksum };
+}
+
+export async function fetchICloudAlbumName(albumUrl: string): Promise<string | null> {
+  try {
+    const token = extractToken(albumUrl);
+    if (!token) return null;
+    const baseUrl = await getStreamBaseUrl(token);
+    const res = await axios.post(
+      `${baseUrl}/${token}/sharedstreams/webstream`,
+      { streamCtag: null },
+      { headers: { "Content-Type": "text/plain", Origin: "https://www.icloud.com" }, timeout: 10000 }
+    );
+    const name = res.data?.streamName;
+    return name && name.trim() ? name.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function scrapeICloudAlbum(

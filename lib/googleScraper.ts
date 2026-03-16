@@ -39,6 +39,27 @@ function normalizeBaseUrl(url: string): string {
  *   5. og:image meta tags fallback
  *   6. Post-process: Test each URL to detect video thumbnails that weren't caught
  */
+export async function fetchGoogleAlbumName(albumUrl: string): Promise<string | null> {
+  try {
+    const res = await axios.get(albumUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      },
+      maxRedirects: 5,
+      timeout: 10000,
+    });
+    const $ = cheerio.load(res.data as string);
+    const ogTitle = $("meta[property='og:title']").attr("content");
+    if (ogTitle) return ogTitle.trim();
+    const title = $("title").text();
+    // Strip " - Google Photos" suffix if present
+    return title ? title.replace(/\s*[-–]\s*Google Photos\s*$/i, "").trim() || null : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function scrapeGooglePhotosAlbum(
   albumUrl: string
 ): Promise<ScrapedPhoto[]> {

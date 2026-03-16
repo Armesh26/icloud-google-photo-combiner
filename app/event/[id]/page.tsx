@@ -275,7 +275,7 @@ export default function EventGalleryPage() {
                 }`}
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                {album.source === "google" ? "Google Photos" : "iCloud"}
+                {album.album_name || (album.source === "google" ? "Google Photos" : "iCloud")}
                 {isOwner && (
                   <button
                     onClick={async () => {

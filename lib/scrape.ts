@@ -1,6 +1,12 @@
 import { getSupabase } from "./db";
 import { scrapeGooglePhotosAlbum } from "./googleScraper";
-import { scrapeICloudAlbum, scrapeICloudShareLink } from "./icloudScraper";
+import {
+  scrapeICloudAlbum,
+  scrapeICloudShareLink,
+  fetchICloudAlbumName,
+  fetchICloudShareLinkName,
+} from "./icloudScraper";
+import { fetchGoogleAlbumName } from "./googleScraper";
 import type { ScrapedPhoto } from "./googleScraper";
 import { shouldRescrape } from "./utils";
 
@@ -52,6 +58,16 @@ export async function scrapeAndStoreAlbum(
     return await promise;
   } finally {
     activeScrapes.delete(albumId);
+  }
+}
+
+async function resolveAlbumName(source: string, albumUrl: string): Promise<string | null> {
+  try {
+    if (source === "google") return await fetchGoogleAlbumName(albumUrl);
+    if (albumUrl.includes("share.icloud.com/photos/")) return await fetchICloudShareLinkName(albumUrl);
+    return await fetchICloudAlbumName(albumUrl);
+  } catch {
+    return null;
   }
 }
 
@@ -120,10 +136,24 @@ async function doScrape(
     if (error) throw new Error(`Failed to insert photos: ${error.message}`);
   }
 
-  await supabase
+  // Fetch album name once (only if not already stored)
+  const { data: albumRow } = await supabase
     .from("albums")
-    .update({ last_scraped_at: new Date().toISOString() })
-    .eq("id", albumId);
+    .select("album_name, source, album_url")
+    .eq("id", albumId)
+    .single();
+
+  const updatePayload: Record<string, unknown> = { last_scraped_at: new Date().toISOString() };
+
+  if (!albumRow?.album_name) {
+    const name = await resolveAlbumName(
+      albumRow?.source ?? source,
+      albumRow?.album_url ?? albumUrl
+    );
+    if (name) updatePayload.album_name = name;
+  }
+
+  await supabase.from("albums").update(updatePayload).eq("id", albumId);
 
   return validatedPhotos.length;
 }

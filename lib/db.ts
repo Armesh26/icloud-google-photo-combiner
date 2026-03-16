@@ -28,6 +28,7 @@ export type Album = {
   event_id: string;
   source: "google" | "icloud";
   album_url: string;
+  album_name: string | null;
   last_scraped_at: string | null;
   created_at: string;
 };

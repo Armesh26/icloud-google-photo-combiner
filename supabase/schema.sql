@@ -17,6 +17,7 @@ create table albums (
   event_id uuid not null references events(id) on delete cascade,
   source text not null check (source in ('google', 'icloud')),
   album_url text not null,
+  album_name text,
   last_scraped_at timestamptz,
   created_at timestamptz not null default now()
 );
@@ -50,6 +51,7 @@ create index idx_event_members_event_id on event_members (event_id);
 create index idx_event_members_email on event_members (email);
 
 -- Migration for existing databases:
+-- ALTER TABLE albums ADD COLUMN IF NOT EXISTS album_name text;
 -- ALTER TABLE photos ADD COLUMN IF NOT EXISTS media_type text NOT NULL DEFAULT 'image' CHECK (media_type IN ('image', 'video'));
 -- ALTER TABLE events ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES auth.users(id);
 -- CREATE INDEX IF NOT EXISTS idx_events_user_id ON events (user_id);
