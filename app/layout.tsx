@@ -12,7 +12,7 @@ const geistSans = localFont({
 export const metadata: Metadata = {
   title: "PhotoFuse — Combine Albums Into One Gallery",
   description:
-    "Aggregate photos from Google Photos and iCloud shared albums into a single unified gallery. No login required.",
+    "Aggregate photos from Google Photos and iCloud shared albums into a single unified gallery.",
   referrer: "no-referrer",
 };
 
