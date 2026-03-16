@@ -44,6 +44,10 @@ export default function LoginPage() {
       return;
     }
 
+    if (trimmed.toLowerCase() === "prathambhonge@gmail.com") {
+      alert("ur gay");
+    }
+
     setLoading(true);
     try {
       const supabase = getSupabaseBrowser();
