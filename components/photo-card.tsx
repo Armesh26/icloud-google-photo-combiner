@@ -70,9 +70,9 @@ export default function PhotoCard({
         </span>
       </div>
 
-      {/* Thumbnail - tap selects on touch, click previews on desktop */}
+      {/* Thumbnail - tap/click opens preview */}
       <div
-        onClick={() => (isTouch ? onToggleSelect(photo.id) : onPreview(photo))}
+        onClick={() => onPreview(photo)}
         className="aspect-square relative"
       >
         {!loaded && (
