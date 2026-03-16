@@ -234,6 +234,32 @@ export default function EventGalleryPage() {
                 Leave Event
               </button>
             )}
+            {isOwner && (
+              <button
+                onClick={async () => {
+                  const confirmText = `Type "${event.name}" to permanently delete this event and all its data:`;
+                  const input = prompt(confirmText);
+                  if (input !== event.name) {
+                    if (input !== null) alert("Event not deleted. You must type the exact event name to confirm.");
+                    return;
+                  }
+                  const res = await fetch("/api/delete-event", {
+                    method: "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ eventId: id }),
+                  });
+                  if (res.ok) {
+                    router.push("/dashboard");
+                  } else {
+                    const json = await res.json().catch(() => ({}));
+                    alert(json.error || "Failed to delete event");
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium transition-colors"
+              >
+                Delete Event
+              </button>
+            )}
           </div>
         </div>
 
@@ -242,7 +268,7 @@ export default function EventGalleryPage() {
             {albums.map((album) => (
               <span
                 key={album.id}
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
+                className={`group/album inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
                   album.source === "google"
                     ? "bg-red-500/10 text-red-400 border border-red-500/20"
                     : "bg-blue-500/10 text-blue-400 border border-blue-500/20"
@@ -253,7 +279,12 @@ export default function EventGalleryPage() {
                 {isOwner && (
                   <button
                     onClick={async () => {
-                      if (!confirm("Delete this album and all its photos?")) return;
+                      const confirmText = `Type "delete" to remove this ${album.source === "google" ? "Google Photos" : "iCloud"} album and all its photos:`;
+                      const input = prompt(confirmText);
+                      if (input?.toLowerCase() !== "delete") {
+                        if (input !== null) alert("Album not deleted. You must type 'delete' to confirm.");
+                        return;
+                      }
                       const res = await fetch("/api/delete-album", {
                         method: "DELETE",
                         headers: { "Content-Type": "application/json" },
@@ -266,7 +297,7 @@ export default function EventGalleryPage() {
                         alert(json.error || "Failed to delete album");
                       }
                     }}
-                    className="ml-1 hover:text-white transition-colors"
+                    className="ml-1 opacity-0 group-hover/album:opacity-100 hover:text-white transition-all"
                     title="Delete album"
                   >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
