@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { PhotoWithAlbum } from "@/lib/db";
 
 type Props = {
@@ -17,6 +17,16 @@ export default function PhotoCard({
   onPreview,
 }: Props) {
   const [loaded, setLoaded] = useState(false);
+  const [isTouch, setIsTouch] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(pointer: coarse)");
+    setIsTouch(mq.matches);
+    const listener = (e: MediaQueryListEvent) => setIsTouch(e.matches);
+    mq.addEventListener("change", listener);
+    return () => mq.removeEventListener("change", listener);
+  }, []);
 
   const isVideo = photo.media_type === "video";
   const sourceBadge = photo.albums?.source === "google" ? "G" : "iC";
@@ -60,9 +70,9 @@ export default function PhotoCard({
         </span>
       </div>
 
-      {/* Thumbnail - tap to select on mobile/desktop */}
+      {/* Thumbnail - tap selects on touch, click previews on desktop */}
       <div
-        onClick={() => onToggleSelect(photo.id)}
+        onClick={() => (isTouch ? onToggleSelect(photo.id) : onPreview(photo))}
         className="aspect-square relative"
       >
         {!loaded && (
