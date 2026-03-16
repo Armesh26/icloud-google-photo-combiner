@@ -55,7 +55,7 @@ export async function scrapeGooglePhotosAlbum(
   identifyVideoThumbnails(html, videoThumbnailBaseUrls);
 
   // --- Strategy 2: Extract real videos (only if we have playable URLs) ---
-  extractVideos(html, photos, seenUrls, videoThumbnailBaseUrls);
+  extractVideos(html, photos, seenUrls);
 
   // --- Strategy 3: Parse AF_initDataCallback for images ---
   extractFromDataCallbacks(html, photos, seenUrls, videoThumbnailBaseUrls);
@@ -156,8 +156,7 @@ function findVideoThumbnailsInData(data: unknown, videoThumbnailBaseUrls: Set<st
 function extractVideos(
   html: string,
   photos: ScrapedPhoto[],
-  seenUrls: Set<string>,
-  _videoThumbnailBaseUrls: Set<string>
+  seenUrls: Set<string>
 ) {
   const $ = cheerio.load(html);
 
