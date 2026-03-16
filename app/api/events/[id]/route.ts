@@ -36,28 +36,36 @@ export async function GET(
 
     const isOwner = event.user_id === user.id;
 
-    if (!isOwner) {
-      const { data: membership } = await supabase
-        .from("event_members")
-        .select("id, status")
-        .eq("event_id", id)
-        .eq("email", user.email!)
-        .single();
+    // Fetch membership (if needed) and albums in parallel
+    const [membershipResult, albumsResult] = await Promise.all([
+      isOwner
+        ? Promise.resolve({ data: null })
+        : supabase
+            .from("event_members")
+            .select("id, status")
+            .eq("event_id", id)
+            .eq("email", user.email!)
+            .single(),
+      supabase
+        .from("albums")
+        .select("id, event_id, source, album_url, album_name, last_scraped_at, created_at")
+        .eq("event_id", event.id),
+    ]);
 
+    if (!isOwner) {
+      const membership = membershipResult.data;
       if (!membership) {
         return NextResponse.json(
           { error: "You don't have access to this event" },
           { status: 403 }
         );
       }
-
       if (membership.status === "pending") {
         return NextResponse.json(
           { error: "You have a pending invite for this event. Accept it from your dashboard first." },
           { status: 403 }
         );
       }
-
       if (membership.status === "declined") {
         return NextResponse.json(
           { error: "You declined the invite to this event" },
@@ -66,10 +74,7 @@ export async function GET(
       }
     }
 
-    const { data: albums } = await supabase
-      .from("albums")
-      .select("id, event_id, source, album_url, album_name, last_scraped_at, created_at")
-      .eq("event_id", event.id);
+    const { data: albums } = albumsResult;
 
     const albumIds = (albums || []).map((a: Album) => a.id);
 
