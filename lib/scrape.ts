@@ -91,14 +91,18 @@ async function doScrape(
 
   if (lastError) throw lastError;
 
+  // Pre-test video URLs: HEAD request to verify they're actually playable
+  // Hide any video that returns non-2xx
+  const validatedPhotos = await validateMediaUrls(photos);
+
   const supabase = getSupabase();
 
   // Delete old rows and re-insert (full refresh)
   await supabase.from("photos").delete().eq("album_id", albumId);
 
-  if (photos.length === 0) return 0;
+  if (validatedPhotos.length === 0) return 0;
 
-  const rows = photos.map((p) => ({
+  const rows = validatedPhotos.map((p) => ({
     album_id: albumId,
     photo_url: p.photo_url,
     thumbnail_url: p.thumbnail_url,
@@ -119,5 +123,52 @@ async function doScrape(
     .update({ last_scraped_at: new Date().toISOString() })
     .eq("id", albumId);
 
-  return photos.length;
+  return validatedPhotos.length;
+}
+
+// ---------------------------------------------------------------------------
+// Validate media URLs: HEAD request to check if videos are actually playable
+// Images are assumed valid (they almost always work with referrerPolicy)
+// ---------------------------------------------------------------------------
+
+async function validateMediaUrls(photos: ScrapedPhoto[]): Promise<ScrapedPhoto[]> {
+  const results = await Promise.all(
+    photos.map(async (photo) => {
+      // Only validate videos - images almost always work
+      if (photo.media_type !== "video") {
+        return photo;
+      }
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        const res = await fetch(photo.photo_url, {
+          method: "HEAD",
+          signal: controller.signal,
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          },
+        });
+
+        clearTimeout(timeoutId);
+
+        // 2xx or 206 (partial content) means the video URL is valid
+        if (res.ok || res.status === 206) {
+          return photo;
+        }
+
+        // Non-2xx: video URL is broken, hide this item
+        console.log(`Video URL failed (${res.status}): ${photo.photo_url.slice(0, 80)}...`);
+        return null;
+      } catch (err) {
+        // Timeout or network error: hide this item
+        console.log(`Video URL check failed: ${err instanceof Error ? err.message : err}`);
+        return null;
+      }
+    })
+  );
+
+  return results.filter((p): p is ScrapedPhoto => p !== null);
 }
