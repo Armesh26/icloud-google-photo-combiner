@@ -60,8 +60,11 @@ export default function PhotoCard({
         </span>
       </div>
 
-      {/* Thumbnail */}
-      <div onClick={() => onPreview(photo)} className="aspect-square relative">
+      {/* Thumbnail - tap to select on mobile/desktop */}
+      <div
+        onClick={() => onToggleSelect(photo.id)}
+        className="aspect-square relative"
+      >
         {!loaded && (
           <div className="absolute inset-0 bg-zinc-800 animate-pulse" />
         )}

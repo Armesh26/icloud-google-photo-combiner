@@ -245,7 +245,7 @@ export default function LoginPage() {
           </form>
         ) : (
           <div className="space-y-4">
-            <div className="flex justify-center gap-3" onPaste={handlePaste}>
+            <div className="flex justify-center gap-2 sm:gap-3" onPaste={handlePaste}>
               {digits.map((digit, i) => (
                 <input
                   key={i}
@@ -256,9 +256,9 @@ export default function LoginPage() {
                   value={digit}
                   onChange={(e) => handleDigitChange(i, e.target.value)}
                   onKeyDown={(e) => handleKeyDown(i, e)}
-                  maxLength={2}
+                  maxLength={1}
                   disabled={loading}
-                  className="w-10 h-12 text-center text-xl font-mono rounded-lg bg-zinc-900 border border-zinc-800 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition disabled:opacity-50"
+                  className="w-8 h-11 text-center text-lg font-mono rounded-lg bg-zinc-900 border border-zinc-800 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition disabled:opacity-50 sm:w-10 sm:h-12 sm:text-xl"
                 />
               ))}
             </div>

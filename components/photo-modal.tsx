@@ -76,14 +76,18 @@ export default function PhotoModal({ photo, onClose, onPrev, onNext }: Props) {
       >
         {isVideo ? (
           <video
-            src={`/api/proxy-image?url=${encodeURIComponent(photo.photo_url)}`}
             controls
             autoPlay
             className="max-w-full max-h-[85vh] rounded-lg bg-black"
             poster={photo.thumbnail_url}
             // @ts-expect-error referrerPolicy is valid on video elements
             referrerPolicy="no-referrer"
-          />
+          >
+            <source
+              src={`/api/proxy-image?url=${encodeURIComponent(photo.photo_url)}`}
+              type="video/mp4"
+            />
+          </video>
         ) : (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
