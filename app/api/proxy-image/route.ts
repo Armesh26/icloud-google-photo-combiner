@@ -39,7 +39,9 @@ export async function GET(req: NextRequest) {
 
   const upstream = await fetch(url, { headers });
 
-  if (!upstream.ok && upstream.status !== 206) {
+  // For range requests, pass through even non-2xx (e.g. upstream 416 range not satisfiable)
+  const isRangeRequest = !!rangeHeader;
+  if (!upstream.ok && upstream.status !== 206 && !isRangeRequest) {
     return NextResponse.json(
       { error: `Upstream ${upstream.status}` },
       { status: upstream.status }
@@ -56,24 +58,15 @@ export async function GET(req: NextRequest) {
   const responseHeaders: HeadersInit = {
     "Content-Type": upstream.headers.get("Content-Type") || "application/octet-stream",
     "Cache-Control": "no-store",
+    // Always advertise range support so the browser will attempt seeking
+    "Accept-Ranges": "bytes",
   };
 
-  // Forward content length
   const contentLength = upstream.headers.get("Content-Length");
-  if (contentLength) {
-    responseHeaders["Content-Length"] = contentLength;
-  }
+  if (contentLength) responseHeaders["Content-Length"] = contentLength;
 
-  // Forward range response headers for video seeking
   const contentRange = upstream.headers.get("Content-Range");
-  if (contentRange) {
-    responseHeaders["Content-Range"] = contentRange;
-  }
-
-  const acceptRanges = upstream.headers.get("Accept-Ranges");
-  if (acceptRanges) {
-    responseHeaders["Accept-Ranges"] = acceptRanges;
-  }
+  if (contentRange) responseHeaders["Content-Range"] = contentRange;
 
   return new NextResponse(upstream.body, {
     status: upstream.status,

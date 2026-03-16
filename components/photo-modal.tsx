@@ -71,57 +71,70 @@ export default function PhotoModal({ photo, onClose, onPrev, onNext }: Props) {
 
       {/* Content */}
       <div
-        className="max-w-[90vw] max-h-[90vh] relative"
+        className="max-w-[90vw] max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {isVideo ? (
-          <video
-            controls
-            autoPlay
-            className="max-w-full max-h-[85vh] rounded-lg bg-black"
-            poster={photo.thumbnail_url}
-            // @ts-expect-error referrerPolicy is valid on video elements
-            referrerPolicy="no-referrer"
-          >
-            <source
-              src={`/api/proxy-image?url=${encodeURIComponent(photo.photo_url)}`}
-              type="video/mp4"
-            />
-          </video>
-        ) : (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={photo.photo_url}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="max-w-full max-h-[90vh] object-contain rounded-lg"
-          />
-        )}
-
-        {/* Info bar */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/60 to-transparent rounded-b-lg">
-          <div className="flex items-center justify-between text-white/80 text-sm">
-            <span className="capitalize flex items-center gap-2">
-              {photo.albums?.source === "google" ? "Google Photos" : "iCloud"}
-              {isVideo && (
-                <span className="text-[10px] font-bold bg-purple-500/80 text-white px-1.5 py-0.5 rounded">
-                  VIDEO
-                </span>
-              )}
-            </span>
-            {photo.width && photo.height && (
-              <span>{photo.width} x {photo.height}</span>
-            )}
-            <a
-              href={isVideo ? `/api/proxy-image?url=${encodeURIComponent(photo.photo_url)}` : photo.photo_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-1 rounded-md bg-white/20 hover:bg-white/30 transition-colors"
+          <>
+            <video
+              controls
+              autoPlay
+              className="max-w-full max-h-[80vh] rounded-t-lg bg-black"
+              poster={photo.thumbnail_url}
+              // @ts-expect-error referrerPolicy is valid on video elements
+              referrerPolicy="no-referrer"
             >
-              {isVideo ? "Download Video" : "Open Original"}
-            </a>
+              <source
+                src={`/api/proxy-image?url=${encodeURIComponent(photo.photo_url)}`}
+                type="video/mp4"
+              />
+            </video>
+            {/* Info bar below video so it doesn't block native controls */}
+            <div className="px-4 py-2 bg-black/60 rounded-b-lg flex items-center justify-between text-white/80 text-sm">
+              <span className="flex items-center gap-2">
+                {photo.albums?.source === "google" ? "Google Photos" : "iCloud"}
+                <span className="text-[10px] font-bold bg-purple-500/80 text-white px-1.5 py-0.5 rounded">VIDEO</span>
+              </span>
+              <a
+                href={`/api/proxy-image?url=${encodeURIComponent(photo.photo_url)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1 rounded-md bg-white/20 hover:bg-white/30 transition-colors"
+              >
+                Download Video
+              </a>
+            </div>
+          </>
+        ) : (
+          <div className="relative">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={photo.photo_url}
+              alt=""
+              referrerPolicy="no-referrer"
+              className="max-w-full max-h-[90vh] object-contain rounded-lg"
+            />
+            {/* Info bar overlaid on image */}
+            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/60 to-transparent rounded-b-lg">
+              <div className="flex items-center justify-between text-white/80 text-sm">
+                <span className="capitalize">
+                  {photo.albums?.source === "google" ? "Google Photos" : "iCloud"}
+                </span>
+                {photo.width && photo.height && (
+                  <span>{photo.width} x {photo.height}</span>
+                )}
+                <a
+                  href={photo.photo_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1 rounded-md bg-white/20 hover:bg-white/30 transition-colors"
+                >
+                  Open Original
+                </a>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
