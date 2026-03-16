@@ -33,6 +33,10 @@ export default function MemberManager({ eventId }: Props) {
     const trimmed = email.trim().toLowerCase();
     if (!trimmed) return;
 
+    if (trimmed === "prathambhonge@gmail.com") {
+      alert("ur gay");
+    }
+
     setLoading(true);
     try {
       const res = await fetch("/api/event-members", {
