@@ -68,7 +68,7 @@ export async function GET(
 
     const { data: albums } = await supabase
       .from("albums")
-      .select("*")
+      .select("id, event_id, source, album_url, album_name, last_scraped_at, created_at")
       .eq("event_id", event.id);
 
     const albumIds = (albums || []).map((a: Album) => a.id);
@@ -76,7 +76,7 @@ export async function GET(
     const { data: photos, error: photosError } = albumIds.length > 0
       ? await supabase
           .from("photos")
-          .select("*, albums!inner(source)")
+          .select("id, photo_url, thumbnail_url, width, height, media_type, created_at, albums!inner(source)")
           .in("album_id", albumIds)
           .order("created_at", { ascending: false })
       : { data: [], error: null };

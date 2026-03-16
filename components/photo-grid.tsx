@@ -153,6 +153,8 @@ export default function PhotoGrid({ photos }: Props) {
       {/* Modal */}
       <PhotoModal
         photo={previewIndex !== null ? filteredPhotos[previewIndex] : null}
+        prevPhoto={previewIndex !== null ? filteredPhotos[(previewIndex - 1 + filteredPhotos.length) % filteredPhotos.length] : null}
+        nextPhoto={previewIndex !== null ? filteredPhotos[(previewIndex + 1) % filteredPhotos.length] : null}
         onClose={() => setPreviewIndex(null)}
         onPrev={() =>
           setPreviewIndex((i) =>

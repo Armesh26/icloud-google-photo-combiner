@@ -26,6 +26,7 @@ export default function EventGalleryPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [checking, setChecking] = useState(false);
   const hasAutoRefreshed = useRef(false);
+  const lastFetchedAt = useRef(0);
 
   const fetchEvent = useCallback(async () => {
     try {
@@ -43,6 +44,7 @@ export default function EventGalleryPage() {
       setData(json);
       setError(null);
       setErrorCode(null);
+      lastFetchedAt.current = Date.now();
     } catch {
       setError("Network error");
     } finally {
@@ -87,15 +89,16 @@ export default function EventGalleryPage() {
   }, [data, backgroundRefresh]);
 
   useEffect(() => {
-    function handleFocus() {
-      fetchEvent();
+    function handleVisible() {
+      // Only refetch if data is stale (>60s since last fetch)
+      if (Date.now() - lastFetchedAt.current > 60_000) fetchEvent();
     }
-    window.addEventListener("focus", handleFocus);
+    window.addEventListener("focus", handleVisible);
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") fetchEvent();
+      if (document.visibilityState === "visible") handleVisible();
     });
     return () => {
-      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("focus", handleVisible);
     };
   }, [fetchEvent]);
 

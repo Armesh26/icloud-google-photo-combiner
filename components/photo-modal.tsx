@@ -5,12 +5,23 @@ import type { PhotoWithAlbum } from "@/lib/db";
 
 type Props = {
   photo: PhotoWithAlbum | null;
+  prevPhoto: PhotoWithAlbum | null;
+  nextPhoto: PhotoWithAlbum | null;
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
 };
 
-export default function PhotoModal({ photo, onClose, onPrev, onNext }: Props) {
+export default function PhotoModal({ photo, prevPhoto, nextPhoto, onClose, onPrev, onNext }: Props) {
+  // Preload adjacent images so next/prev feels instant
+  useEffect(() => {
+    if (prevPhoto && prevPhoto.media_type !== "video") {
+      new window.Image().src = prevPhoto.photo_url;
+    }
+    if (nextPhoto && nextPhoto.media_type !== "video") {
+      new window.Image().src = nextPhoto.photo_url;
+    }
+  }, [prevPhoto, nextPhoto]);
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
