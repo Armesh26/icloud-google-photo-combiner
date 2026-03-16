@@ -130,22 +130,24 @@ async function doScrape(
   }));
 
   const batchSize = 100;
+  const batches: typeof rows[] = [];
   for (let i = 0; i < rows.length; i += batchSize) {
-    const batch = rows.slice(i, i + batchSize);
-    const { error } = await supabase.from("photos").insert(batch);
+    batches.push(rows.slice(i, i + batchSize));
+  }
+
+  // Insert all batches + fetch album name in parallel
+  const [insertResults, albumRow] = await Promise.all([
+    Promise.all(batches.map((batch) => supabase.from("photos").insert(batch))),
+    supabase.from("albums").select("album_name").eq("id", albumId).single(),
+  ]);
+
+  for (const { error } of insertResults) {
     if (error) throw new Error(`Failed to insert photos: ${error.message}`);
   }
 
-  // Fetch album name once (only if not already stored)
-  const { data: albumRow } = await supabase
-    .from("albums")
-    .select("album_name")
-    .eq("id", albumId)
-    .single();
-
   const updatePayload: Record<string, unknown> = { last_scraped_at: new Date().toISOString() };
 
-  if (!albumRow?.album_name) {
+  if (!albumRow.data?.album_name) {
     const name = await resolveAlbumName(source, albumUrl);
     if (name) updatePayload.album_name = name;
   }

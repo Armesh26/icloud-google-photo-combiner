@@ -122,25 +122,19 @@ async function filterVideoThumbnails(photos: ScrapedPhoto[]): Promise<ScrapedPho
 
   console.log(`[Video Filter] Testing ${imagesToTest.length} images for video thumbnails...`);
 
-  // Test in batches to avoid overwhelming the server
-  const BATCH_SIZE = 10;
+  const results = await Promise.all(
+    imagesToTest.map(async (photo) => {
+      const isVideoThumb = await isVideoThumbnail(photo.photo_url);
+      return { photo, isVideoThumb };
+    })
+  );
+
   const validImages: ScrapedPhoto[] = [];
-
-  for (let i = 0; i < imagesToTest.length; i += BATCH_SIZE) {
-    const batch = imagesToTest.slice(i, i + BATCH_SIZE);
-    const results = await Promise.all(
-      batch.map(async (photo) => {
-        const isVideoThumb = await isVideoThumbnail(photo.photo_url);
-        return { photo, isVideoThumb };
-      })
-    );
-
-    for (const { photo, isVideoThumb } of results) {
-      if (!isVideoThumb) {
-        validImages.push(photo);
-      } else {
-        console.log(`[Video Filter] Filtered out video thumbnail: ${photo.photo_url.slice(0, 60)}...`);
-      }
+  for (const { photo, isVideoThumb } of results) {
+    if (!isVideoThumb) {
+      validImages.push(photo);
+    } else {
+      console.log(`[Video Filter] Filtered out video thumbnail: ${photo.photo_url.slice(0, 60)}...`);
     }
   }
 

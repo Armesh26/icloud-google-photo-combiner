@@ -309,33 +309,32 @@ export async function scrapeICloudAlbum(
     }
   }
 
-  // Fetch asset URLs in batches
+  // Fetch asset URLs in parallel batches
   const batchSize = 25;
-  // Build a global checksum → URL map across all batches
   const checksumToUrl = new Map<string, string>();
 
+  const batches: string[][] = [];
   for (let i = 0; i < photoGuids.length; i += batchSize) {
-    const batch = photoGuids.slice(i, i + batchSize);
+    batches.push(photoGuids.slice(i, i + batchSize));
+  }
 
-    const assetRes = await axios.post(
-      `${baseUrl}/${token}/sharedstreams/webasseturls`,
-      { photoGuids: batch },
-      {
-        headers: {
-          "Content-Type": "text/plain",
-          Origin: "https://www.icloud.com",
-        },
-        timeout: 15000,
-      }
-    );
+  const batchResults = await Promise.all(
+    batches.map((batch) =>
+      axios.post(
+        `${baseUrl}/${token}/sharedstreams/webasseturls`,
+        { photoGuids: batch },
+        {
+          headers: { "Content-Type": "text/plain", Origin: "https://www.icloud.com" },
+          timeout: 15000,
+        }
+      )
+    )
+  );
 
+  for (const assetRes of batchResults) {
     const items = assetRes.data?.items;
     if (!items) continue;
-
-    for (const [checksum, assetInfo] of Object.entries(items) as [
-      string,
-      Record<string, string>,
-    ][]) {
+    for (const [checksum, assetInfo] of Object.entries(items) as [string, Record<string, string>][]) {
       const urlPath = assetInfo.url_path;
       const urlLocation = assetInfo.url_location;
       if (!urlPath || !urlLocation) continue;
