@@ -22,6 +22,10 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+/app/debug/
+/app/api/debug-scrape/
+/app/api/debug-save/
+/debug-output/
 
 # local env files
 .env*.local
