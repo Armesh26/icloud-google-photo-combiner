@@ -51,10 +51,7 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    // Delete photos first (cascade should handle this, but be explicit)
-    await supabase.from("photos").delete().eq("album_id", albumId);
-
-    // Delete the album
+    // Delete the album (photos cascade automatically)
     const { error: deleteError } = await supabase
       .from("albums")
       .delete()

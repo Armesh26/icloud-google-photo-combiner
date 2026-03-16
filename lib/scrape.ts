@@ -139,17 +139,14 @@ async function doScrape(
   // Fetch album name once (only if not already stored)
   const { data: albumRow } = await supabase
     .from("albums")
-    .select("album_name, source, album_url")
+    .select("album_name")
     .eq("id", albumId)
     .single();
 
   const updatePayload: Record<string, unknown> = { last_scraped_at: new Date().toISOString() };
 
   if (!albumRow?.album_name) {
-    const name = await resolveAlbumName(
-      albumRow?.source ?? source,
-      albumRow?.album_url ?? albumUrl
-    );
+    const name = await resolveAlbumName(source, albumUrl);
     if (name) updatePayload.album_name = name;
   }
 

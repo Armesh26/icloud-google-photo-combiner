@@ -59,32 +59,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const albumRows = albumUrls.map((url) => ({
+      event_id: event.id,
+      source: validateAlbumUrl(url).source!,
+      album_url: url,
+    }));
+
+    const { data: albums, error: albumsError } = await supabase
+      .from("albums")
+      .insert(albumRows)
+      .select();
+
+    if (albumsError || !albums) {
+      return NextResponse.json(
+        { error: `Failed to create albums: ${albumsError?.message || "unknown"}` },
+        { status: 500 }
+      );
+    }
+
     const scrapeResults = await Promise.allSettled(
-      albumUrls.map(async (url) => {
-        const validation = validateAlbumUrl(url);
-        const source = validation.source!;
-
-        const { data: album, error: albumError } = await supabase
-          .from("albums")
-          .insert({
-            event_id: event.id,
-            source,
-            album_url: url,
-          })
-          .select()
-          .single();
-
-        if (albumError || !album) {
-          throw new Error(`Failed to create album for ${url}`);
-        }
-
-        const count = await scrapeAndStoreAlbum(album.id, source, url, true);
-        return { url, count };
-      })
+      albums.map((album) =>
+        scrapeAndStoreAlbum(album.id, album.source, album.album_url, true)
+          .then((count) => ({ url: album.album_url, count }))
+      )
     );
 
     const results = scrapeResults.map((r, i) => ({
-      url: albumUrls[i],
+      url: albums[i].album_url,
       status: r.status,
       count: r.status === "fulfilled" ? r.value.count : 0,
       error: r.status === "rejected" ? r.reason?.message : undefined,

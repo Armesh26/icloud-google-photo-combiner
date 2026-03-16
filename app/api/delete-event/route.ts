@@ -40,25 +40,7 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    // Get all albums for this event
-    const { data: albums } = await supabase
-      .from("albums")
-      .select("id")
-      .eq("event_id", eventId);
-
-    // Delete photos for all albums
-    if (albums && albums.length > 0) {
-      const albumIds = albums.map((a) => a.id);
-      await supabase.from("photos").delete().in("album_id", albumIds);
-    }
-
-    // Delete albums
-    await supabase.from("albums").delete().eq("event_id", eventId);
-
-    // Delete event members
-    await supabase.from("event_members").delete().eq("event_id", eventId);
-
-    // Delete the event
+    // Delete the event (albums, photos, and members cascade automatically)
     const { error: deleteError } = await supabase
       .from("events")
       .delete()
