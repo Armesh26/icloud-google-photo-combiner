@@ -213,6 +213,27 @@ export default function EventGalleryPage() {
             >
               Share Link
             </button>
+            {!isOwner && (
+              <button
+                onClick={async () => {
+                  if (!confirm("Leave this event? You'll need a new invite to access it again.")) return;
+                  const res = await fetch("/api/leave-event", {
+                    method: "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ eventId: id }),
+                  });
+                  if (res.ok) {
+                    router.push("/dashboard");
+                  } else {
+                    const json = await res.json().catch(() => ({}));
+                    alert(json.error || "Failed to leave event");
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-medium transition-colors"
+              >
+                Leave Event
+              </button>
+            )}
           </div>
         </div>
 
@@ -229,6 +250,30 @@ export default function EventGalleryPage() {
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-current" />
                 {album.source === "google" ? "Google Photos" : "iCloud"}
+                {isOwner && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm("Delete this album and all its photos?")) return;
+                      const res = await fetch("/api/delete-album", {
+                        method: "DELETE",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ albumId: album.id }),
+                      });
+                      if (res.ok) {
+                        fetchEvent();
+                      } else {
+                        const json = await res.json().catch(() => ({}));
+                        alert(json.error || "Failed to delete album");
+                      }
+                    }}
+                    className="ml-1 hover:text-white transition-colors"
+                    title="Delete album"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
               </span>
             ))}
           </div>
