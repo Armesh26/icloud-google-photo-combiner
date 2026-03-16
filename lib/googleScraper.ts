@@ -26,9 +26,9 @@ function isAlbumPhotoUrl(url: string): boolean {
  * Google Photos shared album scraper.
  *
  * Strategy priority:
- *   1. Extract videos from video-downloads.googleusercontent.com URLs
- *   2. Extract og:video meta tags for video URLs
- *   3. Parse AF_initDataCallback data blobs for images
+ *   1. Identify all video thumbnail base URLs (to exclude from images)
+ *   2. Extract videos only if we have a real playable video URL
+ *   3. Parse AF_initDataCallback data blobs for images (excluding video thumbnails)
  *   4. Raw URL regex fallback
  *   5. og:image meta tags fallback
  */
@@ -48,35 +48,116 @@ export async function scrapeGooglePhotosAlbum(
 
   const html: string = response.data;
   const seenUrls = new Set<string>();
+  const videoThumbnailBaseUrls = new Set<string>();
   const photos: ScrapedPhoto[] = [];
 
-  // --- Strategy 1: Extract videos first ---
-  extractVideos(html, photos, seenUrls);
+  // --- Strategy 1: Identify video thumbnails to exclude ---
+  identifyVideoThumbnails(html, videoThumbnailBaseUrls);
 
-  // --- Strategy 2: Parse AF_initDataCallback for images ---
-  extractFromDataCallbacks(html, photos, seenUrls);
+  // --- Strategy 2: Extract real videos (only if we have playable URLs) ---
+  extractVideos(html, photos, seenUrls, videoThumbnailBaseUrls);
 
-  // --- Strategy 3: Raw URL regex fallback ---
+  // --- Strategy 3: Parse AF_initDataCallback for images ---
+  extractFromDataCallbacks(html, photos, seenUrls, videoThumbnailBaseUrls);
+
+  // --- Strategy 4: Raw URL regex fallback ---
   if (photos.length === 0) {
-    extractFromRawUrls(html, photos, seenUrls);
+    extractFromRawUrls(html, photos, seenUrls, videoThumbnailBaseUrls);
   }
 
-  // --- Strategy 4: og:image meta tags fallback ---
+  // --- Strategy 5: og:image meta tags fallback ---
   if (photos.length === 0) {
-    extractFromHtmlTags(html, photos, seenUrls);
+    extractFromHtmlTags(html, photos, seenUrls, videoThumbnailBaseUrls);
   }
 
   return photos;
 }
 
 // ---------------------------------------------------------------------------
-// Video extraction
+// Identify video thumbnails (to exclude from image results)
+// ---------------------------------------------------------------------------
+
+function identifyVideoThumbnails(html: string, videoThumbnailBaseUrls: Set<string>) {
+  const $ = cheerio.load(html);
+
+  // Check og:video - if present, this page has a video
+  const ogVideoUrl = $('meta[property="og:video"]').attr("content");
+  if (ogVideoUrl) {
+    const baseUrl = ogVideoUrl.split("=")[0];
+    videoThumbnailBaseUrls.add(baseUrl);
+  }
+
+  // Find URLs with video thumbnail markers (=m18, =m22, =m37)
+  const videoThumbPattern = /https:\/\/lh3\.googleusercontent\.com\/[^\s"'\\]+?=m(?:18|22|37)[^\s"'\\]*/g;
+  const matches = html.match(videoThumbPattern) || [];
+  for (const url of matches) {
+    const baseUrl = url.split("=")[0];
+    videoThumbnailBaseUrls.add(baseUrl);
+  }
+
+  // Also scan AF_initDataCallback for video/ mime types near lh3 URLs
+  const callbackPattern = /AF_initDataCallback\(\s*\{/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = callbackPattern.exec(html)) !== null) {
+    const startIdx = match.index + match[0].length - 1;
+    const jsonStr = extractBalancedBraces(html, startIdx);
+    if (!jsonStr) continue;
+
+    try {
+      const parsed = lenientJsonParse(jsonStr);
+      if (parsed?.data) {
+        findVideoThumbnailsInData(parsed.data, videoThumbnailBaseUrls);
+      }
+    } catch {
+      // Expected for some callbacks
+    }
+  }
+}
+
+function findVideoThumbnailsInData(data: unknown, videoThumbnailBaseUrls: Set<string>) {
+  if (!Array.isArray(data)) return;
+
+  for (let i = 0; i < data.length; i++) {
+    const item = data[i];
+
+    if (typeof item === "string" && item.includes("lh3.googleusercontent.com/")) {
+      // Check if nearby items indicate this is a video
+      let isVideo = false;
+      for (let j = Math.max(0, i - 20); j < Math.min(data.length, i + 20); j++) {
+        const sibling = data[j];
+        if (typeof sibling === "string") {
+          const lower = sibling.toLowerCase();
+          if (
+            lower.startsWith("video/") ||
+            lower.includes("video-downloads.googleusercontent.com") ||
+            lower === "video"
+          ) {
+            isVideo = true;
+            break;
+          }
+        }
+      }
+
+      if (isVideo) {
+        const baseUrl = item.split("=")[0];
+        videoThumbnailBaseUrls.add(baseUrl);
+      }
+    } else if (Array.isArray(item)) {
+      findVideoThumbnailsInData(item, videoThumbnailBaseUrls);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Video extraction - only extract if we have a REAL playable video URL
 // ---------------------------------------------------------------------------
 
 function extractVideos(
   html: string,
   photos: ScrapedPhoto[],
-  seenUrls: Set<string>
+  seenUrls: Set<string>,
+  videoThumbnailBaseUrls: Set<string>
 ) {
   const $ = cheerio.load(html);
 
@@ -90,7 +171,8 @@ function extractVideos(
   const ogVideoHeight = $('meta[property="og:video:height"]').attr("content");
   const ogImage = $('meta[property="og:image"]').attr("content");
 
-  // If we have a video-downloads URL, use that (highest quality)
+  // ONLY add video if we have a video-downloads URL (real playable video)
+  // Skip og:video fallback since those often don't work without auth
   if (videoDownloadMatches.length > 0) {
     const videoUrl = videoDownloadMatches[0];
     if (!videoUrl) {
@@ -121,26 +203,10 @@ function extractVideos(
       height: ogVideoHeight ? parseInt(ogVideoHeight, 10) : null,
       media_type: "video",
     });
-  } else if (ogVideoUrl) {
-    // Fallback: use og:video URL with =dv parameter
-    const baseUrl = ogVideoUrl.split("=")[0];
-    
-    if (!seenUrls.has(baseUrl)) {
-      seenUrls.add(baseUrl);
-
-      const thumbnailUrl = ogImage && ogImage.includes("googleusercontent.com")
-        ? ogImage.split("=")[0] + "=w400-h400-c"
-        : `${baseUrl}=w400-h400-c`;
-
-      photos.push({
-        photo_url: `${baseUrl}=dv`,
-        thumbnail_url: thumbnailUrl,
-        width: ogVideoWidth ? parseInt(ogVideoWidth, 10) : null,
-        height: ogVideoHeight ? parseInt(ogVideoHeight, 10) : null,
-        media_type: "video",
-      });
-    }
   }
+  // NOTE: We intentionally do NOT fall back to og:video with =dv anymore
+  // because those URLs often return 500 errors without authentication.
+  // Videos without a video-downloads URL will simply be skipped entirely.
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +216,8 @@ function extractVideos(
 function extractFromDataCallbacks(
   html: string,
   photos: ScrapedPhoto[],
-  seenUrls: Set<string>
+  seenUrls: Set<string>,
+  videoThumbnailBaseUrls: Set<string>
 ) {
   const callbackPattern = /AF_initDataCallback\(\s*\{/g;
   let match: RegExpExecArray | null;
@@ -163,7 +230,7 @@ function extractFromDataCallbacks(
     try {
       const parsed = lenientJsonParse(jsonStr);
       if (parsed?.data) {
-        walkDataArray(parsed.data, photos, seenUrls, jsonStr);
+        walkDataArray(parsed.data, photos, seenUrls, videoThumbnailBaseUrls);
       }
     } catch {
       // Expected for some callbacks
@@ -213,7 +280,7 @@ function walkDataArray(
   data: unknown,
   photos: ScrapedPhoto[],
   seenUrls: Set<string>,
-  fullJson: string
+  videoThumbnailBaseUrls: Set<string>
 ) {
   if (!Array.isArray(data)) return;
 
@@ -221,7 +288,7 @@ function walkDataArray(
     const item = data[i];
 
     if (typeof item === "string" && item.includes("lh3.googleusercontent.com/")) {
-      // Skip if this looks like a video thumbnail (=m18)
+      // Skip if this looks like a video thumbnail (=m18, =m22, =m37)
       if (item.includes("=m18") || item.includes("=m37") || item.includes("=m22")) {
         continue;
       }
@@ -236,15 +303,19 @@ function walkDataArray(
       if (!isAlbumPhotoUrl(baseUrl)) continue;
       if (seenUrls.has(baseUrl)) continue;
 
+      // Skip if this base URL was identified as a video thumbnail
+      if (videoThumbnailBaseUrls.has(baseUrl)) continue;
+
       // Check if this is associated with a video by looking for video markers nearby
       let isVideo = false;
-      for (let j = Math.max(0, i - 15); j < Math.min(data.length, i + 15); j++) {
+      for (let j = Math.max(0, i - 20); j < Math.min(data.length, i + 20); j++) {
         const sibling = data[j];
         if (typeof sibling === "string") {
           const lower = sibling.toLowerCase();
           if (
             lower.startsWith("video/") ||
-            lower.includes("video-downloads.googleusercontent.com")
+            lower.includes("video-downloads.googleusercontent.com") ||
+            lower === "video"
           ) {
             isVideo = true;
             break;
@@ -252,7 +323,7 @@ function walkDataArray(
         }
       }
 
-      // Skip if this is a video - we handle videos separately
+      // Skip if this is a video thumbnail - we only want real images
       if (isVideo) continue;
 
       seenUrls.add(baseUrl);
@@ -265,7 +336,7 @@ function walkDataArray(
         media_type: "image",
       });
     } else if (Array.isArray(item)) {
-      walkDataArray(item, photos, seenUrls, fullJson);
+      walkDataArray(item, photos, seenUrls, videoThumbnailBaseUrls);
     }
   }
 }
@@ -277,18 +348,20 @@ function walkDataArray(
 function extractFromRawUrls(
   html: string,
   photos: ScrapedPhoto[],
-  seenUrls: Set<string>
+  seenUrls: Set<string>,
+  videoThumbnailBaseUrls: Set<string>
 ) {
   const urlPattern = /https:\/\/lh3\.googleusercontent\.com\/[a-zA-Z0-9_\-/]{30,}/g;
   const matches = html.match(urlPattern) || [];
 
   for (const rawUrl of matches) {
     // Skip video thumbnails
-    if (rawUrl.includes("=m18")) continue;
+    if (rawUrl.includes("=m18") || rawUrl.includes("=m22") || rawUrl.includes("=m37")) continue;
 
     const baseUrl = rawUrl.split("=")[0];
     if (!isAlbumPhotoUrl(baseUrl)) continue;
     if (seenUrls.has(baseUrl)) continue;
+    if (videoThumbnailBaseUrls.has(baseUrl)) continue;
     seenUrls.add(baseUrl);
 
     photos.push({
@@ -308,7 +381,8 @@ function extractFromRawUrls(
 function extractFromHtmlTags(
   html: string,
   photos: ScrapedPhoto[],
-  seenUrls: Set<string>
+  seenUrls: Set<string>,
+  videoThumbnailBaseUrls: Set<string>
 ) {
   const $ = cheerio.load(html);
   $('meta[property="og:image"]').each((_, el) => {
@@ -316,6 +390,7 @@ function extractFromHtmlTags(
     if (src.includes("googleusercontent.com")) {
       const baseUrl = src.split("=")[0];
       if (seenUrls.has(baseUrl)) return;
+      if (videoThumbnailBaseUrls.has(baseUrl)) return;
       seenUrls.add(baseUrl);
 
       photos.push({
