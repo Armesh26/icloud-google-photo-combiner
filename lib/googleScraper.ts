@@ -22,6 +22,12 @@ function isAlbumPhotoUrl(url: string): boolean {
   return true;
 }
 
+// Normalize base URL for consistent comparison
+function normalizeBaseUrl(url: string): string {
+  // Remove any trailing parameters after = and normalize
+  return url.split("=")[0].replace(/\/+$/, "");
+}
+
 /**
  * Google Photos shared album scraper.
  *
@@ -31,6 +37,7 @@ function isAlbumPhotoUrl(url: string): boolean {
  *   3. Parse AF_initDataCallback data blobs for images (excluding video thumbnails)
  *   4. Raw URL regex fallback
  *   5. og:image meta tags fallback
+ *   6. Post-process: Test each URL to detect video thumbnails that weren't caught
  */
 export async function scrapeGooglePhotosAlbum(
   albumUrl: string
@@ -70,7 +77,105 @@ export async function scrapeGooglePhotosAlbum(
     extractFromHtmlTags(html, photos, seenUrls, videoThumbnailBaseUrls);
   }
 
-  return photos;
+  // --- Strategy 6: Filter out video thumbnails by testing URLs ---
+  // Google doesn't expose video markers in HTML, so we test each URL
+  const filteredPhotos = await filterVideoThumbnails(photos);
+
+  return filteredPhotos;
+}
+
+/**
+ * Test each photo URL to determine if it's actually a video thumbnail.
+ * Video thumbnails will return an image when accessed with =w0, but
+ * the same base URL won't work as a downloadable image (returns small/broken).
+ * We detect this by checking Content-Length - video thumbnails return very small responses.
+ */
+async function filterVideoThumbnails(photos: ScrapedPhoto[]): Promise<ScrapedPhoto[]> {
+  // Only filter items marked as images - videos are already handled
+  const imagesToTest = photos.filter(p => p.media_type === "image");
+  const videos = photos.filter(p => p.media_type === "video");
+
+  if (imagesToTest.length === 0) {
+    return photos;
+  }
+
+  console.log(`[Video Filter] Testing ${imagesToTest.length} images for video thumbnails...`);
+
+  // Test in batches to avoid overwhelming the server
+  const BATCH_SIZE = 10;
+  const validImages: ScrapedPhoto[] = [];
+
+  for (let i = 0; i < imagesToTest.length; i += BATCH_SIZE) {
+    const batch = imagesToTest.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(async (photo) => {
+        const isVideoThumb = await isVideoThumbnail(photo.photo_url);
+        return { photo, isVideoThumb };
+      })
+    );
+
+    for (const { photo, isVideoThumb } of results) {
+      if (!isVideoThumb) {
+        validImages.push(photo);
+      } else {
+        console.log(`[Video Filter] Filtered out video thumbnail: ${photo.photo_url.slice(0, 60)}...`);
+      }
+    }
+  }
+
+  console.log(`[Video Filter] Kept ${validImages.length} images, filtered ${imagesToTest.length - validImages.length} video thumbnails`);
+
+  return [...videos, ...validImages];
+}
+
+/**
+ * Check if a URL is a video thumbnail by testing if it responds to =dv parameter.
+ * Video thumbnails will redirect to video-downloads.googleusercontent.com,
+ * while regular images will return an error.
+ */
+async function isVideoThumbnail(photoUrl: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+    // Get the base URL and test with =dv (video download) parameter
+    const baseUrl = photoUrl.split("=")[0];
+    const videoTestUrl = `${baseUrl}=dv`;
+    
+    // Use redirect: "manual" to check the redirect location
+    const response = await fetch(videoTestUrl, {
+      method: "HEAD",
+      signal: controller.signal,
+      redirect: "manual",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+    });
+
+    clearTimeout(timeoutId);
+
+    // If it redirects to video-downloads.googleusercontent.com, it's a video
+    if (response.status === 302 || response.status === 301) {
+      const location = response.headers.get("location") || "";
+      if (location.includes("video-downloads.googleusercontent.com")) {
+        return true;
+      }
+    }
+
+    // If the =dv URL returns 200 and video content-type, it's a video thumbnail
+    if (response.ok) {
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.startsWith("video/")) {
+        return true;
+      }
+    }
+
+    // If =dv fails or returns non-video, it's a real image
+    return false;
+  } catch {
+    // On timeout/error, assume it's a real image (conservative approach)
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -83,15 +188,27 @@ function identifyVideoThumbnails(html: string, videoThumbnailBaseUrls: Set<strin
   // Check og:video - if present, this page has a video
   const ogVideoUrl = $('meta[property="og:video"]').attr("content");
   if (ogVideoUrl) {
-    const baseUrl = ogVideoUrl.split("=")[0];
+    const baseUrl = normalizeBaseUrl(ogVideoUrl);
     videoThumbnailBaseUrls.add(baseUrl);
+    console.log(`[Video Detection] og:video found: ${baseUrl.slice(0, 80)}...`);
+  }
+
+  // Check og:type - if it's "video.other", the og:image is likely a video thumbnail
+  const ogType = $('meta[property="og:type"]').attr("content");
+  if (ogType === "video.other") {
+    const ogImage = $('meta[property="og:image"]').attr("content");
+    if (ogImage) {
+      const baseUrl = normalizeBaseUrl(ogImage);
+      videoThumbnailBaseUrls.add(baseUrl);
+      console.log(`[Video Detection] og:type=video.other, marking og:image as video thumbnail: ${baseUrl.slice(0, 80)}...`);
+    }
   }
 
   // Find URLs with video thumbnail markers (=m18, =m22, =m37)
   const videoThumbPattern = /https:\/\/lh3\.googleusercontent\.com\/[^\s"'\\]+?=m(?:18|22|37)[^\s"'\\]*/g;
   const matches = html.match(videoThumbPattern) || [];
   for (const url of matches) {
-    const baseUrl = url.split("=")[0];
+    const baseUrl = normalizeBaseUrl(url);
     videoThumbnailBaseUrls.add(baseUrl);
   }
 
@@ -113,25 +230,30 @@ function identifyVideoThumbnails(html: string, videoThumbnailBaseUrls: Set<strin
       // Expected for some callbacks
     }
   }
+
+  console.log(`[Video Detection] Total video thumbnail base URLs identified: ${videoThumbnailBaseUrls.size}`);
 }
 
 function findVideoThumbnailsInData(data: unknown, videoThumbnailBaseUrls: Set<string>) {
   if (!Array.isArray(data)) return;
 
+  // Look for lh3 URLs that have video markers NEARBY in the SAME flat array level
   for (let i = 0; i < data.length; i++) {
     const item = data[i];
 
     if (typeof item === "string" && item.includes("lh3.googleusercontent.com/")) {
-      // Check if nearby items indicate this is a video
+      // Check if nearby items (within 15 positions) indicate this is a video
       let isVideo = false;
-      for (let j = Math.max(0, i - 20); j < Math.min(data.length, i + 20); j++) {
+      for (let j = Math.max(0, i - 15); j < Math.min(data.length, i + 15); j++) {
         const sibling = data[j];
         if (typeof sibling === "string") {
           const lower = sibling.toLowerCase();
           if (
             lower.startsWith("video/") ||
             lower.includes("video-downloads.googleusercontent.com") ||
-            lower === "video"
+            lower === "video" ||
+            lower.includes("video/mp4") ||
+            lower.includes("video/webm")
           ) {
             isVideo = true;
             break;
@@ -140,10 +262,12 @@ function findVideoThumbnailsInData(data: unknown, videoThumbnailBaseUrls: Set<st
       }
 
       if (isVideo) {
-        const baseUrl = item.split("=")[0];
+        const baseUrl = normalizeBaseUrl(item);
         videoThumbnailBaseUrls.add(baseUrl);
+        console.log(`[Video Detection] Found video thumbnail: ${baseUrl.slice(0, 80)}...`);
       }
     } else if (Array.isArray(item)) {
+      // Recurse into nested arrays
       findVideoThumbnailsInData(item, videoThumbnailBaseUrls);
     }
   }
@@ -298,23 +422,28 @@ function walkDataArray(
       if (w === null || h === null) continue;
       if (w < 200 && h < 200) continue;
 
-      const baseUrl = item.split("=")[0];
+      const baseUrl = normalizeBaseUrl(item);
       if (!isAlbumPhotoUrl(baseUrl)) continue;
       if (seenUrls.has(baseUrl)) continue;
 
       // Skip if this base URL was identified as a video thumbnail
-      if (videoThumbnailBaseUrls.has(baseUrl)) continue;
+      if (videoThumbnailBaseUrls.has(baseUrl)) {
+        console.log(`[Video Detection] Skipping video thumbnail in walkDataArray: ${baseUrl.slice(0, 80)}...`);
+        continue;
+      }
 
-      // Check if this is associated with a video by looking for video markers nearby
+      // Check if this is associated with a video by looking for video markers nearby in the SAME array level
       let isVideo = false;
-      for (let j = Math.max(0, i - 20); j < Math.min(data.length, i + 20); j++) {
+      for (let j = Math.max(0, i - 15); j < Math.min(data.length, i + 15); j++) {
         const sibling = data[j];
         if (typeof sibling === "string") {
           const lower = sibling.toLowerCase();
           if (
             lower.startsWith("video/") ||
             lower.includes("video-downloads.googleusercontent.com") ||
-            lower === "video"
+            lower === "video" ||
+            lower.includes("video/mp4") ||
+            lower.includes("video/webm")
           ) {
             isVideo = true;
             break;
@@ -323,7 +452,10 @@ function walkDataArray(
       }
 
       // Skip if this is a video thumbnail - we only want real images
-      if (isVideo) continue;
+      if (isVideo) {
+        console.log(`[Video Detection] Skipping item with nearby video marker: ${baseUrl.slice(0, 80)}...`);
+        continue;
+      }
 
       seenUrls.add(baseUrl);
 
@@ -357,7 +489,7 @@ function extractFromRawUrls(
     // Skip video thumbnails
     if (rawUrl.includes("=m18") || rawUrl.includes("=m22") || rawUrl.includes("=m37")) continue;
 
-    const baseUrl = rawUrl.split("=")[0];
+    const baseUrl = normalizeBaseUrl(rawUrl);
     if (!isAlbumPhotoUrl(baseUrl)) continue;
     if (seenUrls.has(baseUrl)) continue;
     if (videoThumbnailBaseUrls.has(baseUrl)) continue;
@@ -387,7 +519,7 @@ function extractFromHtmlTags(
   $('meta[property="og:image"]').each((_, el) => {
     const src = $(el).attr("content") || "";
     if (src.includes("googleusercontent.com")) {
-      const baseUrl = src.split("=")[0];
+      const baseUrl = normalizeBaseUrl(src);
       if (seenUrls.has(baseUrl)) return;
       if (videoThumbnailBaseUrls.has(baseUrl)) return;
       seenUrls.add(baseUrl);
